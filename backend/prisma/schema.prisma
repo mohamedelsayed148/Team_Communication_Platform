@@ -1,0 +1,224 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlserver"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(uuid()) @db.UniqueIdentifier
+  firstName    String   @db.NVarChar(100)
+  lastName     String   @db.NVarChar(100)
+  email        String   @unique @db.NVarChar(255)
+  passwordHash String   @db.NVarChar(255)
+  status       String   @default("ACTIVE") @db.NVarChar(20)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  userRoles     UserRole[]
+  refreshTokens RefreshToken[]
+
+  createdTeams    Team[]       @relation("TeamCreator")
+  teamMemberships TeamMember[]
+
+  createdTasks  Task[]       @relation("TaskCreator")
+  assignedTasks Task[]       @relation("TaskAssignee")
+  taskUpdates   TaskUpdate[]
+
+  notifications Notification[]
+  emailOutbox   EmailOutbox[]
+
+  taskReminderLogs TaskReminderLog[]
+
+  @@map("Users")
+}
+
+model Role {
+  id          String   @id @default(uuid()) @db.UniqueIdentifier
+  name        String   @unique @db.NVarChar(50)
+  description String?  @db.NVarChar(255)
+  createdAt   DateTime @default(now())
+
+  userRoles UserRole[]
+
+  @@map("Roles")
+}
+
+model UserRole {
+  userId     String   @db.UniqueIdentifier
+  roleId     String   @db.UniqueIdentifier
+  assignedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@map("UserRoles")
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid()) @db.UniqueIdentifier
+  tokenHash String    @unique @db.NVarChar(64)
+  userId    String    @db.UniqueIdentifier
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("RefreshTokens")
+}
+
+model Team {
+  id          String  @id @default(uuid()) @db.UniqueIdentifier
+  name        String  @unique @db.NVarChar(100)
+  description String? @db.NVarChar(500)
+
+  createdById String   @db.UniqueIdentifier
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  createdBy User @relation("TeamCreator", fields: [createdById], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  members TeamMember[]
+
+  tasks Task[]
+
+  @@map("Teams")
+}
+
+model TeamMember {
+  teamId String @db.UniqueIdentifier
+  userId String @db.UniqueIdentifier
+
+  role     String   @default("MEMBER") @db.NVarChar(20)
+  joinedAt DateTime @default(now())
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  user User @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@id([teamId, userId])
+  @@index([userId])
+  @@map("TeamMembers")
+}
+
+model Task {
+  id          String  @id @default(uuid()) @db.UniqueIdentifier
+  title       String  @db.NVarChar(200)
+  description String? @db.NVarChar(Max)
+
+  status   String @default("TODO") @db.NVarChar(20)
+  priority String @default("MEDIUM") @db.NVarChar(20)
+
+  dueDate DateTime?
+
+  teamId       String  @db.UniqueIdentifier
+  createdById  String  @db.UniqueIdentifier
+  assignedToId String? @db.UniqueIdentifier
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  team       Team  @relation(fields: [teamId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  createdBy  User  @relation("TaskCreator", fields: [createdById], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  assignedTo User? @relation("TaskAssignee", fields: [assignedToId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  updates TaskUpdate[]
+
+  notifications Notification[]
+
+  reminderLogs TaskReminderLog[]
+
+  @@index([teamId])
+  @@index([assignedToId])
+  @@index([createdById])
+  @@index([status])
+  @@index([dueDate])
+  @@map("Tasks")
+}
+
+model TaskUpdate {
+  id      String @id @default(uuid()) @db.UniqueIdentifier
+  content String @db.NVarChar(Max)
+
+  taskId   String @db.UniqueIdentifier
+  authorId String @db.UniqueIdentifier
+
+  createdAt DateTime @default(now())
+
+  task   Task @relation(fields: [taskId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  author User @relation(fields: [authorId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([taskId, createdAt])
+  @@index([authorId])
+  @@map("TaskUpdates")
+}
+
+model Notification {
+  id     String  @id @default(uuid()) @db.UniqueIdentifier
+  userId String  @db.UniqueIdentifier
+  taskId String? @db.UniqueIdentifier
+
+  type    String @db.NVarChar(50)
+  title   String @db.NVarChar(200)
+  message String @db.NVarChar(Max)
+
+  isRead    Boolean   @default(false)
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User  @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  task Task? @relation(fields: [taskId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([userId, isRead, createdAt])
+  @@index([taskId])
+  @@map("Notifications")
+}
+
+model EmailOutbox {
+  id     String @id @default(uuid()) @db.UniqueIdentifier
+  userId String @db.UniqueIdentifier
+
+  toEmail String @db.NVarChar(255)
+  subject String @db.NVarChar(255)
+  body    String @db.NVarChar(Max)
+
+  status              String    @default("PENDING") @db.NVarChar(20)
+  attempts            Int       @default(0)
+  lastError           String?   @db.NVarChar(Max)
+  sentAt              DateTime?
+  nextRetryAt         DateTime?
+  processingStartedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([status, nextRetryAt])
+  @@index([userId])
+  @@map("EmailOutbox")
+}
+
+model TaskReminderLog {
+  id     String @id @default(uuid()) @db.UniqueIdentifier
+  taskId String @db.UniqueIdentifier
+  userId String @db.UniqueIdentifier
+
+  type      String   @db.NVarChar(50)
+  dueDate   DateTime
+  createdAt DateTime @default(now())
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  user User @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([taskId, userId, type, dueDate])
+  @@index([taskId])
+  @@index([userId])
+  @@map("TaskReminderLogs")
+}
